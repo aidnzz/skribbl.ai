@@ -125,6 +125,7 @@ class Skribbl(AbstractAsyncContextManager):
         self.socket.on("lobbyLanguage", self.on_lobby_set_language)
         self.socket.on("lobbyPlayerDisconnected", self.on_lobby_player_disconnect)
         self.socket.on("lobbyPlayerConnected", self.on_lobby_player_join)
+        self.socket.on("lobbyChooseWord", self.on_lobby_choose_word)
         self.socket.on("lobbyPlayerGuessedWord", self.on_lobby_player_guessed_word)
 
     @classmethod
@@ -167,6 +168,13 @@ class Skribbl(AbstractAsyncContextManager):
     def on_lobby_current_word(self, word: str) -> None:
         print(f"Current word: {word}")
         self.game.current_word = word
+
+    @json_parse
+    def on_lobby_choose_word(self, id: int) -> None:
+        if (player := self.game.players[id]) == self.game.me():
+            print("We have to choose the word")
+        else:
+            print(f"Player: {player} has to choose word")
 
     @json_parse
     def on_lobby_connected(self, language: str, drawCommands: list[list], players: list[dict], ownerID: int, myID: int, **_) -> None:
