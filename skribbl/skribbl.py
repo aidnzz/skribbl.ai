@@ -7,7 +7,7 @@ from functools import wraps
 from socketio import AsyncClient
 
 from types import SimpleNamespace
-from typing import Callable, NamedTuple, Type, Optional, TypedDict, Any, Union
+from typing import Callable, NamedTuple, Type, Optional, TypedDict, Any, Union, Final
 
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
@@ -60,7 +60,7 @@ class Game:
         return self.players[self.bot_id]
 
 
-LOGIN_URL: str = "wss://skribbl.io:4999"
+LOGIN_URL: Final[str] = "wss://skribbl.io:4999"
 
 
 class Login(NamedTuple):
