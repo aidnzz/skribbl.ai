@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 
+import attr
+
+from typing import TypedDict
 from enum import IntEnum, unique, Enum
-from dataclasses import dataclass
-from typing import Optional, Dict, NamedTuple, TypedDict
+
 
 __all__ = (
     'Language',
@@ -11,7 +13,6 @@ __all__ = (
     'Hat',
     'Eye',
     'Avatar',
-    'UserProfile',
     'Player'
 )
 
@@ -135,32 +136,15 @@ class Eye(IntEnum):
     Monobrow = 30
 
 
-class Avatar(NamedTuple):
-    colour: Colour
-    eye: Eye
-    mouth: Mouth
-    hat: Hat = Hat.Default
+@attr.s(slots=True)
+class Avatar:
+    colour: Colour = attr.ib(converter=Colour)
+    eye: Eye = attr.ib(converter=Eye)
+    mouth: Mouth = attr.ib(converter=Mouth)
+    hat: Hat = attr.ib(default=Hat.Default)
 
 
-class UserProfile(TypedDict):
-    code: str
-    join: str
-    language: str
-    createPrivate: bool
-    name: str
-    avatar: tuple[int, int, int, int]
-
-
-@dataclass
+@attr.s(slots=True)
 class Player:
-    name: str
-    avatar: Avatar
-
-    @property
-    def raw_avatar(self) -> tuple[int, int, int, int]:
-        return tuple(a.value for a in self.avatar)
-
-    @raw_avatar.setter
-    def raw_avatar(self, values: tuple[int, int, int, int]) -> None:
-        """ Set avatar from tuple """
-        self.avatar = Avatar(*values)
+    name: str = attr.ib()
+    avatar: Avatar = attr.ib()
