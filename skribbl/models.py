@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 
 import attr
+
+from typing import Iterable, Type
 from enum import IntEnum, unique, Enum
 
 
@@ -141,8 +143,12 @@ class Avatar:
     mouth: Mouth = attr.ib(converter=Mouth)
     hat: Hat = attr.ib(default=Hat.Default)
 
+    @classmethod
+    def from_iterable(cls: Type['Avatar'], it: Iterable[int]) -> 'Avatar':
+        return cls(*it)
+
 
 @attr.s(slots=True)
 class Player:
     name: str = attr.ib()
-    avatar: Avatar = attr.ib()
+    avatar: Avatar = attr.ib(converter=Avatar.from_iterable)
