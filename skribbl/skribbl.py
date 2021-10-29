@@ -42,6 +42,7 @@ class Game:
     """ Game state """
     bot_id: int = attr.ib()
     owner_id: int = attr.ib()
+    drawer_id: int = attr.ib()
     language: Language = attr.ib(converter=Language)
     canvas: list = attr.ib(factory=list)
     current_word: Optional[str] = attr.ib(default=None)
@@ -49,7 +50,7 @@ class Game:
 
     def add_player(self, *players: list[dict]) -> None:
         players = (SimpleNamespace(**p) for p in players)
-        self.players |= {p.id: Entry(Player(p.name, Avatar(*p.avatar)), p.score, p.guessedWord) for p in players}
+        self.players |= {p.id: Entry(Player(p.name, p.avatar), p.score, p.guessedWord) for p in players}
 
     def owner(self) -> Optional[Entry]:
         """ Returns owner entry. None if in a public game """
@@ -172,13 +173,13 @@ class Skribbl(AbstractAsyncContextManager):
     @json_parse
     def on_lobby_choose_word(self, id: int) -> None:
         if (player := self.game.players[id]) == self.game.me():
-            print("We have to choose the word")
+            print("We have to choose word")
         else:
             print(f"Player: {player} has to choose word")
 
     @json_parse
-    def on_lobby_connected(self, language: str, drawCommands: list[list], players: list[dict], ownerID: int, myID: int, **_) -> None:
-        self.game = Game(myID, ownerID, language.capitalize())
+    def on_lobby_connected(self, language: str, drawCommands: list[list], players: list[dict], ownerID: int, myID: int, drawingID: int, **_) -> None:
+        self.game = Game(myID, ownerID, drawingID, language.capitalize())
         self.game.add_player(*players)
         print(f"Connected to lobby: {self.game}")
 
@@ -192,8 +193,8 @@ class Skribbl(AbstractAsyncContextManager):
 
     def on_lobby_player_guessed_word(self, id: int) -> None:
         player = self.game.players[id]
-        player.guessed_word = True
         print(f"Player {player} guessed word")
+        self.game.add_player()
 
     @property
     def socket(self) -> AsyncClient:
