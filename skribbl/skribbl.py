@@ -1,14 +1,14 @@
-from functools import wraps
+import attr
 import logging
 
+from functools import wraps
 from socketio import AsyncClient
-from typing import Awaitable, Callable, Type, Optional, Dict, NamedTuple, Any
+from typing import Callable, NamedTuple, Type, Optional, TypedDict, Any, Union
 
-from dataclasses import dataclass, field
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from .errors import LoginError
-from .models import Avatar, Language, Player, UserProfile
+from .models import Avatar, Language, Player
 
 log = logging.getLogger("skribbl")
 
@@ -27,18 +27,29 @@ async def client_manager(**kwargs) -> AsyncClient:
         await s.wait()
 
 
-class ListEntry(NamedTuple):
+class Entry(NamedTuple):
     player: Player
     score: int
+    guessed_word: bool 
 
 
-@dataclass
+@attr.s(slots=True)
 class Game:
     """ Game state """
-    canvas = 0
-    current_word: Optional[str] = None
-    language: Language = Language.English
-    players: dict[int, ListEntry] = field(default_factory=dict)
+    bot_id: int = attr.ib()
+    owner_id: int = attr.ib()
+    language: Language = attr.ib(converter=Language)
+    canvas: list = attr.ib(factory=list)
+    current_word: Optional[str] = attr.ib(default=None)
+    players: dict[int, Entry] = attr.ib(factory=dict)
+
+    def owner(self) -> Optional[Entry]:
+        """ Returns owner entry. None if in a public game """
+        return self.players.get(self.owner_id)
+
+    def me(self) -> Entry:
+        """ Returns current player entry """
+        return self.players[self.bot_id]
 
 
 LOGIN_URL: str = "wss://skribbl.io:4999"
@@ -48,6 +59,15 @@ class Login(NamedTuple):
     """ Login response """
     code: int = 0
     host: Optional[str] = None
+
+
+class UserProfile(TypedDict):
+    code: str
+    join: str
+    language: str
+    createPrivate: bool
+    name: str
+    avatar: Union[list[int], tuple[int, int, int, int]]
 
 
 async def login(
@@ -66,7 +86,7 @@ async def login(
         name=profile.name,
         createPrivate=False,
         language=language.value,
-        avatar=profile.avatar,
+        avatar=attr.astuple(profile.avatar),
     )
 
     async with client_manager(**kwargs) as socket:
@@ -74,7 +94,7 @@ async def login(
         await socket.emit("login", profile)
 
         @socket.event
-        async def result(r: dict) -> None:
+        def result(r: dict) -> None:
             nonlocal login
             login = Login(**r)
 
@@ -88,7 +108,6 @@ class Skribbl(AbstractAsyncContextManager):
     __slots__ = 'game', '_socket'
 
     def __init__(self, socket: Optional[AsyncClient] = None, **kwargs):
-        self.game = Game()
         self._socket = socket or make_client(**kwargs)
 
         # Setup event handlers
@@ -96,7 +115,8 @@ class Skribbl(AbstractAsyncContextManager):
         self.socket.on("lobbyConnected", self.on_lobby_connected)
         self.socket.on("lobbyCurrentWord", self.on_lobby_current_word)
         self.socket.on("lobbyLanguage", self.on_lobby_set_language)
-        # self.socket.on("lobbyPlayerConnected", self.on_lobby_player_join)
+        self.socket.on("lobbyPlayerDisconnected", self.on_lobby_player_disconnect)
+        self.socket.on("lobbyPlayerConnected", self.on_lobby_player_join)
 
     @classmethod
     async def join(
@@ -112,7 +132,7 @@ class Skribbl(AbstractAsyncContextManager):
         socket = make_client(**kwargs)
 
         @socket.on('*')
-        async def all(name, *data) -> None:
+        def all(name, *data) -> None:
             print(name, data)
 
         await socket.connect(host, transports="websocket")
@@ -120,32 +140,40 @@ class Skribbl(AbstractAsyncContextManager):
 
         return cls(socket)
 
-    def json_parse(fn: Callable[..., Awaitable[Any]]):
+    def json_parse(fn: Callable[..., Any]):
         @wraps(fn)
-        async def wrapper(self: 'Skribbl', data: dict, *args, **kwargs) -> Any:
-            return await fn(self, *args, **data, **kwargs)
+        def wrapper(self: 'Skribbl', data: dict, *args, **kwargs) -> Any:
+            return fn(self, *args, **data, **kwargs)
         return wrapper
 
     @json_parse
-    async def on_chat(self, id: int, message: str) -> None:
+    def on_chat(self, id: int, message: str) -> None:
         player = self.game.players.get(id, id)
-        log.info(f"Chat: {player}, {message}")
+        print(f"Chat: {player}, {message}")
 
-    async def on_lobby_current_word(self, word: str) -> None:
-        log.info(f"Current word: {word}")
+    def on_lobby_player_disconnect(self, id: int) -> None:
+        player = self.game.players.pop(id, id)
+        print(f"Player disconnected: {player}")
+
+    def on_lobby_current_word(self, word: str) -> None:
+        print(f"Current word: {word}")
         self.game.current_word = word
 
-    async def on_lobby_connected(self, lobby) -> None:
-        log.info(f"Lobby: {lobby}")
+    @json_parse
+    def on_lobby_connected(self, language: str, drawCommands: list[list], players: list[dict], ownerID: int, myID: int, **_) -> None:
+        print(f"Connected to lobby")
+        self.game = Game(myID, ownerID, language.capitalize())
+        for player in players:
+            self.on_lobby_player_join(player)
 
     @json_parse
-    async def on_lobby_player_join(self, id: int, name: str, avatar: tuple[int, int, int, int], score: int) -> None:
-        avatar = Avatar(**avatar)
-        log.info(f"Player joined: {name}, {avatar}")
-        self.game.players[id] = ListEntry(Player(name, avatar), score)
+    def on_lobby_player_join(self, id: int, name: str, avatar: list[int], score: int, guessedWord: bool) -> None:
+        player = Player(name, Avatar(*avatar))
+        print(f"Player joined: {player}")
+        self.game.players[id] = Entry(player, score=score, guessed_word=guessedWord)
 
-    async def on_lobby_set_language(self, language: str) -> None:
-        log.info(f"Language set: {language}")
+    def on_lobby_set_language(self, language: str) -> None:
+        print(f"Language set: {language}")
         self.game.language = Language(language.capitalize())
 
     @property
@@ -154,6 +182,12 @@ class Skribbl(AbstractAsyncContextManager):
 
     async def wait(self) -> None:
         await self.socket.wait()
+
+    def __repr__(self) -> str:
+        return f"{self.game!r}"
+
+    def __str__(self) -> str:
+        return f"{self.game!s}"
 
     async def __aexit__(self, *_) -> None:
         await self.wait()
