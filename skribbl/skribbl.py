@@ -1,8 +1,12 @@
+# -*- coding: utf-8 -*-
+
 import attr
 import logging
 
 from functools import wraps
 from socketio import AsyncClient
+
+from types import SimpleNamespace
 from typing import Callable, NamedTuple, Type, Optional, TypedDict, Any, Union
 
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -42,6 +46,10 @@ class Game:
     canvas: list = attr.ib(factory=list)
     current_word: Optional[str] = attr.ib(default=None)
     players: dict[int, Entry] = attr.ib(factory=dict)
+
+    def add_player(self, *players: list[dict]) -> None:
+        players = (SimpleNamespace(**p) for p in players)
+        self.players |= {p.id: Entry(Player(p.name, Avatar(*p.avatar)), p.score, p.guessedWord) for p in players}
 
     def owner(self) -> Optional[Entry]:
         """ Returns owner entry. None if in a public game """
@@ -117,6 +125,7 @@ class Skribbl(AbstractAsyncContextManager):
         self.socket.on("lobbyLanguage", self.on_lobby_set_language)
         self.socket.on("lobbyPlayerDisconnected", self.on_lobby_player_disconnect)
         self.socket.on("lobbyPlayerConnected", self.on_lobby_player_join)
+        self.socket.on("lobbyPlayerGuessedWord", self.on_lobby_player_guessed_word)
 
     @classmethod
     async def join(
@@ -148,11 +157,11 @@ class Skribbl(AbstractAsyncContextManager):
 
     @json_parse
     def on_chat(self, id: int, message: str) -> None:
-        player = self.game.players.get(id, id)
+        player = self.game.players[id]
         print(f"Chat: {player}, {message}")
 
     def on_lobby_player_disconnect(self, id: int) -> None:
-        player = self.game.players.pop(id, id)
+        player = self.game.players.pop(id)
         print(f"Player disconnected: {player}")
 
     def on_lobby_current_word(self, word: str) -> None:
@@ -161,20 +170,22 @@ class Skribbl(AbstractAsyncContextManager):
 
     @json_parse
     def on_lobby_connected(self, language: str, drawCommands: list[list], players: list[dict], ownerID: int, myID: int, **_) -> None:
-        print(f"Connected to lobby")
         self.game = Game(myID, ownerID, language.capitalize())
-        for player in players:
-            self.on_lobby_player_join(player)
+        self.game.add_player(*players)
+        print(f"Connected to lobby: {self.game}")
 
-    @json_parse
-    def on_lobby_player_join(self, id: int, name: str, avatar: list[int], score: int, guessedWord: bool) -> None:
-        player = Player(name, Avatar(*avatar))
-        print(f"Player joined: {player}")
-        self.game.players[id] = Entry(player, score=score, guessed_word=guessedWord)
+    def on_lobby_player_join(self, entry: dict) -> None:
+        print(f"Player joined: {entry}")
+        self.game.add_player(entry)
 
     def on_lobby_set_language(self, language: str) -> None:
         print(f"Language set: {language}")
         self.game.language = Language(language.capitalize())
+
+    def on_lobby_player_guessed_word(self, id: int) -> None:
+        player = self.game.players[id]
+        player.guessed_word = True
+        print(f"Player {player} guessed word")
 
     @property
     def socket(self) -> AsyncClient:
@@ -182,12 +193,6 @@ class Skribbl(AbstractAsyncContextManager):
 
     async def wait(self) -> None:
         await self.socket.wait()
-
-    def __repr__(self) -> str:
-        return f"{self.game!r}"
-
-    def __str__(self) -> str:
-        return f"{self.game!s}"
 
     async def __aexit__(self, *_) -> None:
         await self.wait()
