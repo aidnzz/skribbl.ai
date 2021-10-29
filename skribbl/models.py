@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 
 import attr
-
-from typing import TypedDict
 from enum import IntEnum, unique, Enum
 
 
